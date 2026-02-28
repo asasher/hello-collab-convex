@@ -1,0 +1,24 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "dev": {
+      "with": ["dev:convex"],
+      "cache": false,
+      "persistent": true
+    },
+    "dev:convex": {
+      "cache": false,
+      "persistent": false
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**"]
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "codegen": {
+      "cache": false
+    }
+  }
+}
