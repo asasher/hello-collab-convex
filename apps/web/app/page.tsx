@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { Check, ChevronsUpDown } from "lucide-react";
+import { useForm, useWatch } from "react-hook-form";
 import uniqolor from "uniqolor";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -50,6 +53,45 @@ type PresenceEditor = {
   color: string;
   isLight: boolean;
 };
+
+const statusTextOptions = ["Draft", "Reviewing", "Live"] as const;
+const statusTextOptionSet = new Set(
+  statusTextOptions.map((option) => option.toLowerCase()),
+);
+
+const ownerEmailSchema = z.string().refine(
+  (value) => {
+    const trimmed = value.trim();
+    return trimmed.length === 0 || z.email().safeParse(trimmed).success;
+  },
+  { message: "Enter a valid email address" },
+);
+
+const statusTextSchema = z.string().refine(
+  (value) => {
+    const trimmed = value.trim();
+    return (
+      trimmed.length === 0 ||
+      statusTextOptionSet.has(trimmed.toLowerCase())
+    );
+  },
+  {
+    message: `Status must be one of: ${statusTextOptions.join(", ")}`,
+  },
+);
+
+const appStateFormSchema = z.object({
+  projectName: z.string(),
+  ownerName: z.string(),
+  ownerEmail: ownerEmailSchema,
+  headline: z.string(),
+  statusText: statusTextSchema,
+  shortSummary: z.string(),
+  longDescription: z.string(),
+  notes: z.string(),
+});
+
+type AppStateFormValues = z.infer<typeof appStateFormSchema>;
 
 const PRESENCE_ROOM = "appStateEditor";
 const PRESENCE_HEARTBEAT_MS = 5_000;
@@ -135,10 +177,52 @@ function createClientUser() {
   };
 }
 
+function isValidOwnerEmail(value: string) {
+  return ownerEmailSchema.safeParse(value).success;
+}
+
+function normalizeStatusText(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return "";
+  }
+
+  const canonical = statusTextOptions.find(
+    (option) => option.toLowerCase() === trimmed.toLowerCase(),
+  );
+  return canonical ?? trimmed;
+}
+
+function isValidStatusText(value: string) {
+  return statusTextSchema.safeParse(value).success;
+}
+
 export default function HomePage() {
   const [currentUser] = useState(createClientUser);
   const [tagsOpen, setTagsOpen] = useState(false);
   const [editingField, setEditingField] = useState<PresenceField | null>(null);
+  const {
+    control,
+    setValue,
+    clearErrors,
+    getValues,
+    trigger,
+    formState: { errors },
+  } = useForm<AppStateFormValues>({
+    resolver: zodResolver(appStateFormSchema),
+    mode: "onChange",
+    defaultValues: {
+      projectName: "",
+      ownerName: "",
+      ownerEmail: "",
+      headline: "",
+      statusText: "",
+      shortSummary: "",
+      longDescription: "",
+      notes: "",
+    },
+  });
+  const formValues = useWatch({ control });
 
   const appState = useQuery(api.appState.get);
   const presenceResult = useQuery(api.presence.list, { room: PRESENCE_ROOM });
@@ -217,6 +301,65 @@ export default function HomePage() {
     patchState({ [field]: value } as AppStatePatch);
   }
 
+  function patchValidatedField(field: TextFieldKey, value: string) {
+    setValue(field, value, { shouldDirty: true, shouldValidate: true });
+    if (field === "statusText") {
+      const normalizedStatus = normalizeStatusText(value);
+      if (isValidStatusText(normalizedStatus)) {
+        patchTextField(field, normalizedStatus);
+      }
+      return;
+    }
+
+    if (field !== "ownerEmail") {
+      patchTextField(field, value);
+      return;
+    }
+
+    const normalizedEmail = value.trim();
+    if (isValidOwnerEmail(normalizedEmail)) {
+      patchTextField(field, normalizedEmail);
+    }
+  }
+
+  async function validateAndPersistEmail() {
+    const isValid = await trigger("ownerEmail");
+    if (!isValid) {
+      return;
+    }
+
+    const normalizedEmail = getValues("ownerEmail").trim();
+    setValue("ownerEmail", normalizedEmail, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    patchTextField("ownerEmail", normalizedEmail);
+  }
+
+  async function validateAndPersistStatusText() {
+    const isValid = await trigger("statusText");
+    if (!isValid) {
+      return;
+    }
+
+    const normalizedStatus = normalizeStatusText(getValues("statusText"));
+    setValue("statusText", normalizedStatus, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    patchTextField("statusText", normalizedStatus);
+  }
+
+  function validateAndPersistField(field: TextFieldKey) {
+    if (field === "ownerEmail") {
+      void validateAndPersistEmail();
+      return;
+    }
+    if (field === "statusText") {
+      void validateAndPersistStatusText();
+    }
+  }
+
   function toggleTag(tag: string) {
     if (!appState) {
       return;
@@ -261,6 +404,24 @@ export default function HomePage() {
   }, [presenceResult, currentUser.id]);
 
   const selectedTagEditors = editorsByField.get("selectedTags") ?? [];
+
+  useEffect(() => {
+    if (!appState) {
+      return;
+    }
+
+    for (const field of textFields) {
+      if (field.key === editingField) {
+        continue;
+      }
+      setValue(field.key, appState[field.key], {
+        shouldDirty: false,
+        shouldTouch: false,
+        shouldValidate: false,
+      });
+      clearErrors(field.key);
+    }
+  }, [appState, editingField, setValue, clearErrors]);
 
   if (!appState) {
     return (
@@ -331,11 +492,14 @@ export default function HomePage() {
                 <span className="text-sm font-medium">{field.label}</span>
                 {field.multiline ? (
                   <textarea
-                    value={appState[field.key]}
+                    value={formValues[field.key] ?? ""}
                     onFocus={() => setEditingField(field.key)}
-                    onBlur={() => setEditingField(null)}
+                    onBlur={() => {
+                      setEditingField(null);
+                      validateAndPersistField(field.key);
+                    }}
                     onChange={(event) =>
-                      patchTextField(field.key, event.target.value)
+                      patchValidatedField(field.key, event.target.value)
                     }
                     placeholder={field.placeholder}
                     rows={4}
@@ -343,16 +507,25 @@ export default function HomePage() {
                   />
                 ) : (
                   <input
-                    value={appState[field.key]}
+                    value={formValues[field.key] ?? ""}
                     onFocus={() => setEditingField(field.key)}
-                    onBlur={() => setEditingField(null)}
+                    onBlur={() => {
+                      setEditingField(null);
+                      validateAndPersistField(field.key);
+                    }}
                     onChange={(event) =>
-                      patchTextField(field.key, event.target.value)
+                      patchValidatedField(field.key, event.target.value)
                     }
                     placeholder={field.placeholder}
+                    aria-invalid={errors[field.key] ? true : undefined}
                     className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 )}
+                {errors[field.key] ? (
+                  <p className="text-xs text-destructive">
+                    {errors[field.key]?.message}
+                  </p>
+                ) : null}
               </label>
             );
           })}
