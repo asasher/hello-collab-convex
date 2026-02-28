@@ -1,50 +1,55 @@
 # hello-collab-convex
 
-Turborepo scaffold for:
-- Next.js (App Router)
-- Tailwind CSS v4
-- shadcn/ui
-- Convex (local deployment)
-- Portless local app URLs
-- Bun package manager
+Reference project for showcasing collaborative editing patterns with Convex.
 
-## Workspace Layout
+## What This Demonstrates
 
-- `apps/web`: Next.js + Convex app
+- Shared app state stored as one Convex document (`appState` table)
+- Optimistic client updates for low-latency editing
+- Presence tracking for active editors (`presence` table)
+- Field-level "who is editing" UI hints
+- Real-time JSON preview of current shared state
 
-## Prerequisites
+## Stack
 
-- Bun installed (`bun --version`)
+- Bun workspaces + Turborepo
+- Next.js App Router (React 19)
+- Convex
+- Tailwind CSS + shadcn/ui
 
-## Install
+## Project Layout
+
+- `apps/web/app/page.tsx`: collaborative editor UI
+- `apps/web/convex/appState.ts`: read/update shared document
+- `apps/web/convex/presence.ts`: upsert/list active editors
+- `apps/web/convex/schema.ts`: `appState` and `presence` tables
+
+## Quick Start
 
 ```bash
 bun install
-```
-
-## Run Development
-
-```bash
 bun run dev
 ```
 
-`bun run dev` runs the `web` app through Turbo and starts:
-- local Convex dev server/watcher
-- Next.js dev server via Portless at `http://web.localhost:1355`
+Then open `http://web.localhost:1355`.
 
-## Useful Scripts
+## Scripts
 
 ```bash
-bun run dev             # Turbo -> apps/web dev (Convex + Next via Portless)
-bun run dev:next        # Next.js only (Portless)
-bun run dev:convex      # Convex only
-bun run codegen         # Regenerate Convex types
-bun run lint
-bun run build
+bun run dev       # Turbo dev (web app)
+bun run build     # Turbo build (web)
+bun run lint      # Turbo lint (web)
+bun run codegen   # Convex codegen through Turbo
 ```
+
+## Collaboration Flow
+
+1. Open the app in two browser tabs/windows.
+2. Edit a field in one tab.
+3. Watch instant state updates and presence indicators in the other tab.
+4. Use the tags control to test collaborative selection state.
 
 ## Notes
 
-- Convex local deployment settings are in `apps/web/.env.local`.
-- Generated Convex client/server types are in `apps/web/convex/_generated/`.
-- UI component example: `apps/web/components/ui/button.tsx`.
+- Convex generated types live in `apps/web/convex/_generated/`.
+- Presence entries are treated as stale after 15 seconds in `presence.ts`.
