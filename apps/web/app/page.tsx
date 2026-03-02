@@ -22,7 +22,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { api } from "@/convex/_generated/api";
-import useLatestValue from "@/hooks/useLatestValue";
 import useSingleFlight from "@/hooks/useSingleFlight";
 import { cn } from "@/lib/utils";
 
@@ -247,39 +246,20 @@ export default function HomePage() {
       [writePresenceMutation],
     ),
   );
-  const [nextPresenceWrite, queuePresenceWrite] =
-    useLatestValue<PresenceUpdateArgs>();
 
   const queuePresence = useCallback(
     (field: PresenceField | null) => {
-      queuePresenceWrite({
+      void writePresence({
         room: PRESENCE_ROOM,
         userId: currentUser.id,
         userName: currentUser.name,
         editingField: field,
+      }).catch((error) => {
+        console.error("Failed to write presence", error);
       });
     },
-    [currentUser.id, currentUser.name, queuePresenceWrite],
+    [currentUser.id, currentUser.name, writePresence],
   );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const pump = async () => {
-      while (!cancelled) {
-        const args = await nextPresenceWrite();
-        if (cancelled) {
-          return;
-        }
-        await writePresence(args);
-      }
-    };
-
-    void pump();
-    return () => {
-      cancelled = true;
-    };
-  }, [nextPresenceWrite, writePresence]);
 
   useEffect(() => {
     queuePresence(editingField);
