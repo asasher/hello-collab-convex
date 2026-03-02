@@ -1,53 +1,47 @@
+import { Presence } from "@convex-dev/presence";
 import { v } from "convex/values";
+import { components } from "./_generated/api";
 import { mutation, query } from "./_generated/server";
 
-const STALE_PRESENCE_MS = 15_000;
+export const presence = new Presence(components.presence);
 
-export const list = query({
-  args: { room: v.string() },
-  handler: async (ctx, args) => {
-    const cutoff = Date.now() - STALE_PRESENCE_MS;
-    const rows = await ctx.db
-      .query("presence")
-      .withIndex("by_room", (q) => q.eq("room", args.room))
-      .collect();
-
-    return rows.filter((row) => row.updatedAt >= cutoff);
+export const heartbeat = mutation({
+  args: {
+    roomId: v.string(),
+    userId: v.string(),
+    sessionId: v.string(),
+    interval: v.number(),
+  },
+  handler: async (ctx, { roomId, userId, sessionId, interval }) => {
+    return await presence.heartbeat(ctx, roomId, userId, sessionId, interval);
   },
 });
 
-export const upsert = mutation({
-  args: {
-    room: v.string(),
-    userId: v.string(),
-    userName: v.string(),
-    editingField: v.union(v.string(), v.null()),
+export const list = query({
+  args: { roomToken: v.string() },
+  handler: async (ctx, { roomToken }) => {
+    return await presence.list(ctx, roomToken);
   },
-  handler: async (ctx, args) => {
-    const now = Date.now();
-    const existing = await ctx.db
-      .query("presence")
-      .withIndex("by_room_user", (q) =>
-        q.eq("room", args.room).eq("userId", args.userId),
-      )
-      .unique();
+});
 
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        userName: args.userName,
-        editingField: args.editingField,
-        updatedAt: now,
-      });
-      return;
-    }
+export const disconnect = mutation({
+  args: { sessionToken: v.string() },
+  handler: async (ctx, { sessionToken }) => {
+    return await presence.disconnect(ctx, sessionToken);
+  },
+});
 
-    await ctx.db.insert("presence", {
-      room: args.room,
-      userId: args.userId,
-      userName: args.userName,
-      editingField: args.editingField,
-      createdAt: now,
-      updatedAt: now,
-    });
+export const updateRoomUser = mutation({
+  args: {
+    roomId: v.string(),
+    userId: v.string(),
+    data: v.object({
+      userName: v.string(),
+      editingFieldPath: v.union(v.string(), v.null()),
+    }),
+  },
+  returns: v.null(),
+  handler: async (ctx, { roomId, userId, data }) => {
+    return await presence.updateRoomUser(ctx, roomId, userId, data);
   },
 });

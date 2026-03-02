@@ -9,14 +9,4 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
-  presence: defineTable({
-    room: v.string(),
-    userId: v.string(),
-    userName: v.string(),
-    editingField: v.union(v.string(), v.null()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_room", ["room"])
-    .index("by_room_user", ["room", "userId"]),
 });

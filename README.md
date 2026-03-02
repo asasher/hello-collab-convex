@@ -4,9 +4,9 @@ Reference project for showcasing collaborative editing patterns with Convex.
 
 ## What This Demonstrates
 
-- Shared app state stored as one Convex document (`appState` table)
+- Shared nested app state stored as one Convex document (`appState` table)
 - Optimistic client updates for low-latency editing
-- Presence tracking for active editors (`presence` table)
+- Presence tracking via the Convex Presence component (`@convex-dev/presence`)
 - Field-level "who is editing" UI hints
 - Real-time JSON preview of current shared state
 
@@ -21,8 +21,9 @@ Reference project for showcasing collaborative editing patterns with Convex.
 
 - `apps/web/app/page.tsx`: collaborative editor UI
 - `apps/web/convex/appState.ts`: read/update shared document
-- `apps/web/convex/presence.ts`: upsert/list active editors
-- `apps/web/convex/schema.ts`: `appState` and `presence` tables
+- `apps/web/convex/presence.ts`: Presence component wrappers + metadata updates
+- `apps/web/convex/convex.config.ts`: mounts Presence component
+- `apps/web/convex/schema.ts`: `appState` table
 
 ## Quick Start
 
@@ -52,4 +53,4 @@ bun run codegen   # Convex codegen through Turbo
 ## Notes
 
 - Convex generated types live in `apps/web/convex/_generated/`.
-- Presence entries are treated as stale after 15 seconds in `presence.ts`.
+- Presence heartbeats/disconnect handling come from `@convex-dev/presence/react`.

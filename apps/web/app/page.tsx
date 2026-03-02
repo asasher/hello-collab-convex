@@ -1,56 +1,66 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Check, ChevronsUpDown } from "lucide-react";
-import { useForm, useWatch } from "react-hook-form";
-import uniqolor from "uniqolor";
-import { z } from "zod";
-import { Button } from "@/components/ui/button";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { CollaborativeInput } from "@/components/collaboration/collaborative-input";
+import { CollaborativeMultiSelect } from "@/components/collaboration/collaborative-multi-select";
+import { CollaborativeTextarea } from "@/components/collaboration/collaborative-textarea";
+import { useCollaboration } from "@/components/collaboration/collaboration-provider";
 import { api } from "@/convex/_generated/api";
-import useSingleFlight from "@/hooks/useSingleFlight";
-import { cn } from "@/lib/utils";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQuery } from "convex/react";
+import { useEffect } from "react";
+import { useForm, useWatch } from "react-hook-form";
+import { z } from "zod";
 
 type AppState = {
-  projectName: string;
-  ownerName: string;
-  ownerEmail: string;
-  headline: string;
-  statusText: string;
-  shortSummary: string;
-  longDescription: string;
-  notes: string;
-  selectedTags: string[];
+  project: {
+    name: string;
+    headline: string;
+    statusText: string;
+    selectedTags: string[];
+  };
+  owner: {
+    name: string;
+    email: string;
+  };
+  content: {
+    shortSummary: string;
+    longDescription: string;
+    notes: string;
+  };
 };
 
-type TextFieldKey = Exclude<keyof AppState, "selectedTags">;
-type AppStatePatch = Partial<AppState>;
-type PresenceField = keyof AppState;
-type PresenceUpdateArgs = {
-  room: string;
-  userId: string;
-  userName: string;
-  editingField: PresenceField | null;
+type AppStatePatch = {
+  project?: Partial<AppState["project"]>;
+  owner?: Partial<AppState["owner"]>;
+  content?: Partial<AppState["content"]>;
 };
-type PresenceEditor = {
-  userId: string;
-  userName: string;
-  color: string;
-  isLight: boolean;
+
+type FormFieldKey =
+  | "projectName"
+  | "ownerName"
+  | "ownerEmail"
+  | "headline"
+  | "statusText"
+  | "shortSummary"
+  | "longDescription"
+  | "notes";
+
+type TextFieldPath =
+  | "project.name"
+  | "owner.name"
+  | "owner.email"
+  | "project.headline"
+  | "project.statusText"
+  | "content.shortSummary"
+  | "content.longDescription"
+  | "content.notes";
+
+type TextFieldConfig = {
+  formKey: FormFieldKey;
+  path: TextFieldPath;
+  label: string;
+  placeholder: string;
+  multiline?: boolean;
 };
 
 const statusTextOptions = ["Draft", "Reviewing", "Live"] as const;
@@ -92,50 +102,54 @@ const appStateFormSchema = z.object({
 
 type AppStateFormValues = z.infer<typeof appStateFormSchema>;
 
-const PRESENCE_ROOM = "appStateEditor";
-const PRESENCE_HEARTBEAT_MS = 5_000;
-
-const textFields: Array<{
-  key: TextFieldKey;
-  label: string;
-  placeholder: string;
-  multiline?: boolean;
-}> = [
+const textFields: TextFieldConfig[] = [
   {
-    key: "projectName",
+    formKey: "projectName",
+    path: "project.name",
     label: "Project Name",
     placeholder: "Kitchen Sink State Demo",
   },
-  { key: "ownerName", label: "Owner Name", placeholder: "Alex Example" },
   {
-    key: "ownerEmail",
+    formKey: "ownerName",
+    path: "owner.name",
+    label: "Owner Name",
+    placeholder: "Alex Example",
+  },
+  {
+    formKey: "ownerEmail",
+    path: "owner.email",
     label: "Owner Email",
     placeholder: "alex@example.com",
   },
   {
-    key: "headline",
+    formKey: "headline",
+    path: "project.headline",
     label: "Headline",
     placeholder: "All your app state in one JSON document",
   },
   {
-    key: "statusText",
+    formKey: "statusText",
+    path: "project.statusText",
     label: "Status Text",
     placeholder: "Draft / Reviewing / Live",
   },
   {
-    key: "shortSummary",
+    formKey: "shortSummary",
+    path: "content.shortSummary",
     label: "Short Summary",
     placeholder: "High-level summary for the UI",
     multiline: true,
   },
   {
-    key: "longDescription",
+    formKey: "longDescription",
+    path: "content.longDescription",
     label: "Long Description",
     placeholder: "Detailed description and context",
     multiline: true,
   },
   {
-    key: "notes",
+    formKey: "notes",
+    path: "content.notes",
     label: "Notes",
     placeholder: "Free-form notes",
     multiline: true,
@@ -152,29 +166,6 @@ const tagOptions = [
   "Finance",
   "Legal",
 ] as const;
-
-const presenceFields: PresenceField[] = [...textFields.map((f) => f.key), "selectedTags"];
-const presenceFieldSet = new Set<PresenceField>(presenceFields);
-
-function isPresenceField(value: string): value is PresenceField {
-  return presenceFieldSet.has(value as PresenceField);
-}
-
-function createClientUser() {
-  const id =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2);
-  const shortId = id.replace(/-/g, "").slice(0, 6).toUpperCase();
-  const colorInfo = uniqolor(id, { format: "hex" });
-
-  return {
-    id,
-    name: `User ${shortId}`,
-    color: colorInfo.color,
-    isLight: colorInfo.isLight,
-  };
-}
 
 function isValidOwnerEmail(value: string) {
   return ownerEmailSchema.safeParse(value).success;
@@ -196,10 +187,67 @@ function isValidStatusText(value: string) {
   return statusTextSchema.safeParse(value).success;
 }
 
+function getTextFieldValue(state: AppState, path: TextFieldPath): string {
+  switch (path) {
+    case "project.name":
+      return state.project.name;
+    case "owner.name":
+      return state.owner.name;
+    case "owner.email":
+      return state.owner.email;
+    case "project.headline":
+      return state.project.headline;
+    case "project.statusText":
+      return state.project.statusText;
+    case "content.shortSummary":
+      return state.content.shortSummary;
+    case "content.longDescription":
+      return state.content.longDescription;
+    case "content.notes":
+      return state.content.notes;
+  }
+}
+
+function patchForTextField(path: TextFieldPath, value: string): AppStatePatch {
+  switch (path) {
+    case "project.name":
+      return { project: { name: value } };
+    case "owner.name":
+      return { owner: { name: value } };
+    case "owner.email":
+      return { owner: { email: value } };
+    case "project.headline":
+      return { project: { headline: value } };
+    case "project.statusText":
+      return { project: { statusText: value } };
+    case "content.shortSummary":
+      return { content: { shortSummary: value } };
+    case "content.longDescription":
+      return { content: { longDescription: value } };
+    case "content.notes":
+      return { content: { notes: value } };
+  }
+}
+
+function applyPatch(current: AppState, patch: AppStatePatch): AppState {
+  return {
+    project: {
+      ...current.project,
+      ...(patch.project ?? {}),
+    },
+    owner: {
+      ...current.owner,
+      ...(patch.owner ?? {}),
+    },
+    content: {
+      ...current.content,
+      ...(patch.content ?? {}),
+    },
+  };
+}
+
 export default function HomePage() {
-  const [currentUser] = useState(createClientUser);
-  const [tagsOpen, setTagsOpen] = useState(false);
-  const [editingField, setEditingField] = useState<PresenceField | null>(null);
+  const { currentUser, activeField } = useCollaboration();
   const {
     control,
     setValue,
@@ -224,7 +272,6 @@ export default function HomePage() {
   const formValues = useWatch({ control });
 
   const appState = useQuery(api.appState.get);
-  const presenceResult = useQuery(api.presence.list, { room: PRESENCE_ROOM });
 
   const updateAppState = useMutation(api.appState.update).withOptimisticUpdate(
     (localStore, args) => {
@@ -233,110 +280,74 @@ export default function HomePage() {
         return;
       }
 
-      localStore.setQuery(api.appState.get, {}, {
-        ...current,
-        ...args.patch,
-      });
+      localStore.setQuery(api.appState.get, {}, applyPatch(current, args.patch));
     },
   );
-  const writePresenceMutation = useMutation(api.presence.upsert);
-  const writePresence = useSingleFlight(
-    useCallback(
-      (args: PresenceUpdateArgs) => writePresenceMutation(args),
-      [writePresenceMutation],
-    ),
-  );
-
-  const queuePresence = useCallback(
-    (field: PresenceField | null) => {
-      void writePresence({
-        room: PRESENCE_ROOM,
-        userId: currentUser.id,
-        userName: currentUser.name,
-        editingField: field,
-      }).catch((error) => {
-        console.error("Failed to write presence", error);
-      });
-    },
-    [currentUser.id, currentUser.name, writePresence],
-  );
-
-  useEffect(() => {
-    queuePresence(editingField);
-  }, [editingField, queuePresence]);
-
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      queuePresence(editingField);
-    }, PRESENCE_HEARTBEAT_MS);
-
-    return () => clearInterval(intervalId);
-  }, [editingField, queuePresence]);
 
   function patchState(patch: AppStatePatch) {
     void updateAppState({ patch });
   }
 
-  function patchTextField(field: TextFieldKey, value: string) {
-    patchState({ [field]: value } as AppStatePatch);
+  function patchTextField(path: TextFieldPath, value: string) {
+    patchState(patchForTextField(path, value));
   }
 
-  function patchValidatedField(field: TextFieldKey, value: string) {
-    setValue(field, value, { shouldDirty: true, shouldValidate: true });
-    if (field === "statusText") {
+  function patchValidatedField(field: TextFieldConfig, value: string) {
+    setValue(field.formKey, value, { shouldDirty: true, shouldValidate: true });
+    if (field.formKey === "statusText") {
       const normalizedStatus = normalizeStatusText(value);
       if (isValidStatusText(normalizedStatus)) {
-        patchTextField(field, normalizedStatus);
+        patchTextField(field.path, normalizedStatus);
       }
       return;
     }
 
-    if (field !== "ownerEmail") {
-      patchTextField(field, value);
+    if (field.formKey !== "ownerEmail") {
+      patchTextField(field.path, value);
       return;
     }
 
     const normalizedEmail = value.trim();
     if (isValidOwnerEmail(normalizedEmail)) {
-      patchTextField(field, normalizedEmail);
+      patchTextField(field.path, normalizedEmail);
     }
   }
 
-  async function validateAndPersistEmail() {
-    const isValid = await trigger("ownerEmail");
+  async function validateAndPersistEmail(field: TextFieldConfig) {
+    const isValid = await trigger(field.formKey);
     if (!isValid) {
       return;
     }
 
-    const normalizedEmail = getValues("ownerEmail").trim();
-    setValue("ownerEmail", normalizedEmail, {
+    const normalizedEmail = getValues(field.formKey).trim();
+    setValue(field.formKey, normalizedEmail, {
       shouldDirty: true,
       shouldValidate: true,
     });
-    patchTextField("ownerEmail", normalizedEmail);
+    patchTextField(field.path, normalizedEmail);
   }
 
-  async function validateAndPersistStatusText() {
-    const isValid = await trigger("statusText");
+  async function validateAndPersistStatusText(field: TextFieldConfig) {
+    const isValid = await trigger(field.formKey);
     if (!isValid) {
       return;
     }
 
-    const normalizedStatus = normalizeStatusText(getValues("statusText"));
-    setValue("statusText", normalizedStatus, {
+    const normalizedStatus = normalizeStatusText(getValues(field.formKey));
+    setValue(field.formKey, normalizedStatus, {
       shouldDirty: true,
       shouldValidate: true,
     });
-    patchTextField("statusText", normalizedStatus);
+    patchTextField(field.path, normalizedStatus);
   }
 
-  function validateAndPersistField(field: TextFieldKey) {
-    if (field === "ownerEmail") {
-      void validateAndPersistEmail();
+  function validateAndPersistField(field: TextFieldConfig) {
+    if (field.formKey === "ownerEmail") {
+      void validateAndPersistEmail(field);
       return;
     }
-    if (field === "statusText") {
-      void validateAndPersistStatusText();
+    if (field.formKey === "statusText") {
+      void validateAndPersistStatusText(field);
     }
   }
 
@@ -345,45 +356,12 @@ export default function HomePage() {
       return;
     }
 
-    const nextTags = appState.selectedTags.includes(tag)
-      ? appState.selectedTags.filter((existingTag) => existingTag !== tag)
-      : [...appState.selectedTags, tag];
+    const nextTags = appState.project.selectedTags.includes(tag)
+      ? appState.project.selectedTags.filter((existingTag) => existingTag !== tag)
+      : [...appState.project.selectedTags, tag];
 
-    patchState({ selectedTags: nextTags });
+    patchState({ project: { selectedTags: nextTags } });
   }
-
-  const editorsByField = useMemo(() => {
-    const presence = presenceResult ?? [];
-    const map = new Map<PresenceField, PresenceEditor[]>();
-    for (const field of presenceFields) {
-      map.set(field, []);
-    }
-
-    for (const row of presence) {
-      if (row.userId === currentUser.id || row.editingField === null) {
-        continue;
-      }
-      if (!isPresenceField(row.editingField)) {
-        continue;
-      }
-
-      const colorInfo = uniqolor(row.userId, { format: "hex" });
-      const editors = map.get(row.editingField);
-      if (!editors) {
-        continue;
-      }
-      editors.push({
-        userId: row.userId,
-        userName: row.userName,
-        color: colorInfo.color,
-        isLight: colorInfo.isLight,
-      });
-    }
-
-    return map;
-  }, [presenceResult, currentUser.id]);
-
-  const selectedTagEditors = editorsByField.get("selectedTags") ?? [];
 
   useEffect(() => {
     if (!appState) {
@@ -391,17 +369,18 @@ export default function HomePage() {
     }
 
     for (const field of textFields) {
-      if (field.key === editingField) {
+      if (field.path === activeField) {
         continue;
       }
-      setValue(field.key, appState[field.key], {
+
+      setValue(field.formKey, getTextFieldValue(appState, field.path), {
         shouldDirty: false,
         shouldTouch: false,
         shouldValidate: false,
       });
-      clearErrors(field.key);
+      clearErrors(field.formKey);
     }
-  }, [appState, editingField, setValue, clearErrors]);
+  }, [activeField, appState, clearErrors, setValue]);
 
   if (!appState) {
     return (
@@ -417,7 +396,7 @@ export default function HomePage() {
       <header className="space-y-1">
         <h1 className="text-3xl font-semibold tracking-tight">App State</h1>
         <p className="text-muted-foreground">
-          Single JSON-like Convex state document with optimistic updates.
+          Single nested Convex state document with optimistic updates.
         </p>
         <p className="text-xs text-muted-foreground">
           You are{" "}
@@ -436,180 +415,50 @@ export default function HomePage() {
       <section className="grid gap-6 lg:grid-cols-[1fr_380px]">
         <div className="space-y-4">
           {textFields.map((field) => {
-            const editors = editorsByField.get(field.key) ?? [];
-            const outlineStyle =
-              editors.length > 0
-                ? ({
-                    outlineColor: editors[0].color,
-                  } as const)
-                : undefined;
+            const maybeMessage = errors[field.formKey]?.message;
+            const errorMessage =
+              typeof maybeMessage === "string" ? maybeMessage : undefined;
+
+            if (field.multiline) {
+              return (
+                <CollaborativeTextarea
+                  key={field.path}
+                  fieldPath={field.path}
+                  label={field.label}
+                  value={formValues[field.formKey] ?? ""}
+                  placeholder={field.placeholder}
+                  rows={4}
+                  onValueBlur={() => validateAndPersistField(field)}
+                  onValueChange={(value) => patchValidatedField(field, value)}
+                  errorMessage={errorMessage}
+                />
+              );
+            }
 
             return (
-              <label
-                key={field.key}
-                className={cn(
-                  "relative block space-y-2 rounded-md p-1",
-                  editors.length > 0 && "outline outline-2 outline-offset-2",
-                )}
-                style={outlineStyle}
-              >
-                {editors.length > 0 ? (
-                  <div className="pointer-events-none absolute -top-2 right-2 flex flex-wrap gap-1">
-                    {editors.map((editor) => (
-                      <span
-                        key={editor.userId}
-                        className="rounded px-2 py-0.5 text-[10px] font-medium"
-                        style={{
-                          backgroundColor: editor.color,
-                          color: editor.isLight ? "#0f172a" : "#f8fafc",
-                        }}
-                      >
-                        {editor.userName}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                <span className="text-sm font-medium">{field.label}</span>
-                {field.multiline ? (
-                  <textarea
-                    value={formValues[field.key] ?? ""}
-                    onFocus={() => setEditingField(field.key)}
-                    onBlur={() => {
-                      setEditingField(null);
-                      validateAndPersistField(field.key);
-                    }}
-                    onChange={(event) =>
-                      patchValidatedField(field.key, event.target.value)
-                    }
-                    placeholder={field.placeholder}
-                    rows={4}
-                    className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                ) : (
-                  <input
-                    value={formValues[field.key] ?? ""}
-                    onFocus={() => setEditingField(field.key)}
-                    onBlur={() => {
-                      setEditingField(null);
-                      validateAndPersistField(field.key);
-                    }}
-                    onChange={(event) =>
-                      patchValidatedField(field.key, event.target.value)
-                    }
-                    placeholder={field.placeholder}
-                    aria-invalid={errors[field.key] ? true : undefined}
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                )}
-                {errors[field.key] ? (
-                  <p className="text-xs text-destructive">
-                    {errors[field.key]?.message}
-                  </p>
-                ) : null}
-              </label>
+              <CollaborativeInput
+                key={field.path}
+                fieldPath={field.path}
+                label={field.label}
+                type={field.formKey === "ownerEmail" ? "email" : "text"}
+                value={formValues[field.formKey] ?? ""}
+                placeholder={field.placeholder}
+                onValueBlur={() => validateAndPersistField(field)}
+                onValueChange={(value) => patchValidatedField(field, value)}
+                errorMessage={errorMessage}
+              />
             );
           })}
 
-          <div
-            className={cn(
-              "relative space-y-2 rounded-md p-1",
-              selectedTagEditors.length > 0 && "outline outline-2 outline-offset-2",
-            )}
-            style={
-              selectedTagEditors.length > 0
-                ? {
-                    outlineColor: selectedTagEditors[0]?.color,
-                  }
-                : undefined
-            }
-          >
-            {selectedTagEditors.length > 0 ? (
-              <div className="pointer-events-none absolute -top-2 right-2 flex flex-wrap gap-1">
-                {selectedTagEditors.map((editor) => (
-                  <span
-                    key={editor.userId}
-                    className="rounded px-2 py-0.5 text-[10px] font-medium"
-                    style={{
-                      backgroundColor: editor.color,
-                      color: editor.isLight ? "#0f172a" : "#f8fafc",
-                    }}
-                  >
-                    {editor.userName}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            <p className="text-sm font-medium">Tags</p>
-            <Popover
-              open={tagsOpen}
-              onOpenChange={(open) => {
-                setTagsOpen(open);
-                setEditingField(open ? "selectedTags" : null);
-              }}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={tagsOpen}
-                  className="w-full justify-between"
-                  onFocus={() => setEditingField("selectedTags")}
-                  onBlur={() => {
-                    if (!tagsOpen) {
-                      setEditingField(null);
-                    }
-                  }}
-                >
-                  {appState.selectedTags.length > 0
-                    ? `${appState.selectedTags.length} selected`
-                    : "Select tags"}
-                  <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-(--radix-popover-trigger-width) p-0">
-                <Command>
-                  <CommandInput placeholder="Find tags..." />
-                  <CommandList>
-                    <CommandEmpty>No tags found.</CommandEmpty>
-                    <CommandGroup>
-                      {tagOptions.map((tag) => {
-                        const isSelected = appState.selectedTags.includes(tag);
-                        return (
-                          <CommandItem
-                            key={tag}
-                            onSelect={() => toggleTag(tag)}
-                            className="gap-2"
-                          >
-                            <Check
-                              className={cn(
-                                "size-4",
-                                isSelected ? "opacity-100" : "opacity-0",
-                              )}
-                            />
-                            {tag}
-                          </CommandItem>
-                        );
-                      })}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-            {appState.selectedTags.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {appState.selectedTags.map((tag) => (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => toggleTag(tag)}
-                    className="inline-flex h-7 items-center rounded-md border border-border bg-muted px-2 text-xs font-medium hover:bg-muted/80"
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <CollaborativeMultiSelect
+            fieldPath="project.selectedTags"
+            label="Tags"
+            options={tagOptions}
+            selectedValues={appState.project.selectedTags}
+            onToggleValue={toggleTag}
+            triggerPlaceholder="Select tags"
+            searchPlaceholder="Find tags..."
+          />
         </div>
 
         <aside className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
