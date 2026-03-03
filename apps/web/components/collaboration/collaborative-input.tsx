@@ -1,9 +1,10 @@
 "use client";
 
+import { getCollaborativeFieldChrome } from "@/components/collaboration/collaborative-field-chrome";
 import { useCollaborativeField } from "@/components/collaboration/collaboration-provider";
-import { EditorBadges } from "@/components/collaboration/editor-badges";
-import { cn } from "@/lib/utils";
-import type { InputHTMLAttributes } from "react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useId, type InputHTMLAttributes } from "react";
 
 type CollaborativeInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -25,21 +26,30 @@ export function CollaborativeInput({
   className,
   ...inputProps
 }: CollaborativeInputProps) {
-  const { editors, hasEditors, outlineStyle, setFieldActive, clearFieldActive } =
+  const { editors, outlineStyle, setFieldActive, clearFieldActive } =
     useCollaborativeField(fieldPath);
+  const generatedId = useId();
+  const inputId = inputProps.id ?? generatedId;
+  const errorId = errorMessage ? `${inputId}-error` : undefined;
+  const describedBy = [inputProps["aria-describedby"], errorId]
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+  const fieldChrome = getCollaborativeFieldChrome({
+    className: "block",
+    editors,
+    outlineStyle,
+  });
 
   return (
-    <label
-      className={cn(
-        "relative block space-y-2 rounded-md p-1",
-        hasEditors && "outline outline-2 outline-offset-2",
-      )}
-      style={outlineStyle}
+    <div
+      className={fieldChrome.className}
+      style={fieldChrome.style}
+      data-editor-badge={fieldChrome.badgeText}
     >
-      <EditorBadges editors={editors} />
-      <span className="text-sm font-medium">{label}</span>
-      <input
+      <Label htmlFor={inputId}>{label}</Label>
+      <Input
         {...inputProps}
+        id={inputId}
         onFocus={(event) => {
           setFieldActive();
           inputProps.onFocus?.(event);
@@ -52,13 +62,15 @@ export function CollaborativeInput({
         onChange={(event) => {
           onValueChange(event.target.value);
         }}
+        aria-describedby={describedBy || undefined}
         aria-invalid={errorMessage ? true : inputProps["aria-invalid"]}
-        className={cn(
-          "h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          className,
-        )}
+        className={className}
       />
-      {errorMessage ? <p className="text-xs text-destructive">{errorMessage}</p> : null}
-    </label>
+      {errorMessage ? (
+        <p id={errorId} className="text-xs text-destructive">
+          {errorMessage}
+        </p>
+      ) : null}
+    </div>
   );
 }

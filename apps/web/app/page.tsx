@@ -7,7 +7,7 @@ import { useCollaboration } from "@/components/collaboration/collaboration-provi
 import { api } from "@/convex/_generated/api";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery } from "convex/react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
@@ -167,6 +167,13 @@ const tagOptions = [
   "Legal",
 ] as const;
 
+const TEXT_PATCH_DEBOUNCE_MS = 250;
+
+type DebouncedTextPatch = {
+  timeoutId: ReturnType<typeof setTimeout>;
+  value: string;
+};
+
 function isValidOwnerEmail(value: string) {
   return ownerEmailSchema.safeParse(value).success;
 }
@@ -283,6 +290,9 @@ export default function HomePage() {
       localStore.setQuery(api.appState.get, {}, applyPatch(current, args.patch));
     },
   );
+  const debouncedTextPatchesRef = useRef<Map<TextFieldPath, DebouncedTextPatch>>(
+    new Map(),
+  );
 
   function patchState(patch: AppStatePatch) {
     void updateAppState({ patch });
@@ -292,28 +302,62 @@ export default function HomePage() {
     patchState(patchForTextField(path, value));
   }
 
+  function clearDebouncedTextPatch(path: TextFieldPath) {
+    const pendingPatch = debouncedTextPatchesRef.current.get(path);
+    if (!pendingPatch) {
+      return;
+    }
+
+    clearTimeout(pendingPatch.timeoutId);
+    debouncedTextPatchesRef.current.delete(path);
+  }
+
+  function queueDebouncedTextPatch(path: TextFieldPath, value: string) {
+    clearDebouncedTextPatch(path);
+    const timeoutId = setTimeout(() => {
+      patchTextField(path, value);
+      debouncedTextPatchesRef.current.delete(path);
+    }, TEXT_PATCH_DEBOUNCE_MS);
+
+    debouncedTextPatchesRef.current.set(path, { timeoutId, value });
+  }
+
+  function flushDebouncedTextPatch(path: TextFieldPath) {
+    const pendingPatch = debouncedTextPatchesRef.current.get(path);
+    if (!pendingPatch) {
+      return;
+    }
+
+    clearTimeout(pendingPatch.timeoutId);
+    debouncedTextPatchesRef.current.delete(path);
+    patchTextField(path, pendingPatch.value);
+  }
+
   function patchValidatedField(field: TextFieldConfig, value: string) {
     setValue(field.formKey, value, { shouldDirty: true, shouldValidate: true });
+    clearDebouncedTextPatch(field.path);
+
     if (field.formKey === "statusText") {
       const normalizedStatus = normalizeStatusText(value);
       if (isValidStatusText(normalizedStatus)) {
-        patchTextField(field.path, normalizedStatus);
+        queueDebouncedTextPatch(field.path, normalizedStatus);
       }
       return;
     }
 
     if (field.formKey !== "ownerEmail") {
-      patchTextField(field.path, value);
+      queueDebouncedTextPatch(field.path, value);
       return;
     }
 
     const normalizedEmail = value.trim();
     if (isValidOwnerEmail(normalizedEmail)) {
-      patchTextField(field.path, normalizedEmail);
+      queueDebouncedTextPatch(field.path, normalizedEmail);
     }
   }
 
   async function validateAndPersistEmail(field: TextFieldConfig) {
+    clearDebouncedTextPatch(field.path);
     const isValid = await trigger(field.formKey);
     if (!isValid) {
       return;
@@ -328,6 +372,7 @@ export default function HomePage() {
   }
 
   async function validateAndPersistStatusText(field: TextFieldConfig) {
+    clearDebouncedTextPatch(field.path);
     const isValid = await trigger(field.formKey);
     if (!isValid) {
       return;
@@ -348,7 +393,10 @@ export default function HomePage() {
     }
     if (field.formKey === "statusText") {
       void validateAndPersistStatusText(field);
+      return;
     }
+
+    flushDebouncedTextPatch(field.path);
   }
 
   function toggleTag(tag: string) {
@@ -381,6 +429,16 @@ export default function HomePage() {
       clearErrors(field.formKey);
     }
   }, [activeField, appState, clearErrors, setValue]);
+
+  useEffect(() => {
+    const debouncedPatches = debouncedTextPatchesRef.current;
+    return () => {
+      for (const pendingPatch of debouncedPatches.values()) {
+        clearTimeout(pendingPatch.timeoutId);
+      }
+      debouncedPatches.clear();
+    };
+  }, []);
 
   if (!appState) {
     return (

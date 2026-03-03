@@ -1,7 +1,7 @@
 "use client";
 
+import { getCollaborativeFieldChrome } from "@/components/collaboration/collaborative-field-chrome";
 import { useCollaborativeField } from "@/components/collaboration/collaboration-provider";
-import { EditorBadges } from "@/components/collaboration/editor-badges";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -11,6 +11,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -40,19 +41,20 @@ export function CollaborativeMultiSelect({
   searchPlaceholder = "Find option...",
 }: CollaborativeMultiSelectProps) {
   const [open, setOpen] = useState(false);
-  const { editors, hasEditors, outlineStyle, setFieldActive, clearFieldActive } =
+  const { editors, outlineStyle, setFieldActive, clearFieldActive } =
     useCollaborativeField(fieldPath);
+  const fieldChrome = getCollaborativeFieldChrome({
+    editors,
+    outlineStyle,
+  });
 
   return (
     <div
-      className={cn(
-        "relative space-y-2 rounded-md p-1",
-        hasEditors && "outline outline-2 outline-offset-2",
-      )}
-      style={outlineStyle}
+      className={fieldChrome.className}
+      style={fieldChrome.style}
+      data-editor-badge={fieldChrome.badgeText}
     >
-      <EditorBadges editors={editors} />
-      <p className="text-sm font-medium">{label}</p>
+      <Label>{label}</Label>
       <Popover
         open={open}
         onOpenChange={(nextOpen) => {

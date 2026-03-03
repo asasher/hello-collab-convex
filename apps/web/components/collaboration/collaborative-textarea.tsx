@@ -1,9 +1,10 @@
 "use client";
 
+import { getCollaborativeFieldChrome } from "@/components/collaboration/collaborative-field-chrome";
 import { useCollaborativeField } from "@/components/collaboration/collaboration-provider";
-import { EditorBadges } from "@/components/collaboration/editor-badges";
-import { cn } from "@/lib/utils";
-import type { TextareaHTMLAttributes } from "react";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useId, type TextareaHTMLAttributes } from "react";
 
 type CollaborativeTextareaProps = Omit<
   TextareaHTMLAttributes<HTMLTextAreaElement>,
@@ -25,21 +26,30 @@ export function CollaborativeTextarea({
   className,
   ...textareaProps
 }: CollaborativeTextareaProps) {
-  const { editors, hasEditors, outlineStyle, setFieldActive, clearFieldActive } =
+  const { editors, outlineStyle, setFieldActive, clearFieldActive } =
     useCollaborativeField(fieldPath);
+  const generatedId = useId();
+  const textareaId = textareaProps.id ?? generatedId;
+  const errorId = errorMessage ? `${textareaId}-error` : undefined;
+  const describedBy = [textareaProps["aria-describedby"], errorId]
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+  const fieldChrome = getCollaborativeFieldChrome({
+    className: "block",
+    editors,
+    outlineStyle,
+  });
 
   return (
-    <label
-      className={cn(
-        "relative block space-y-2 rounded-md p-1",
-        hasEditors && "outline outline-2 outline-offset-2",
-      )}
-      style={outlineStyle}
+    <div
+      className={fieldChrome.className}
+      style={fieldChrome.style}
+      data-editor-badge={fieldChrome.badgeText}
     >
-      <EditorBadges editors={editors} />
-      <span className="text-sm font-medium">{label}</span>
-      <textarea
+      <Label htmlFor={textareaId}>{label}</Label>
+      <Textarea
         {...textareaProps}
+        id={textareaId}
         onFocus={(event) => {
           setFieldActive();
           textareaProps.onFocus?.(event);
@@ -52,12 +62,15 @@ export function CollaborativeTextarea({
         onChange={(event) => {
           onValueChange(event.target.value);
         }}
-        className={cn(
-          "min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          className,
-        )}
+        aria-describedby={describedBy || undefined}
+        aria-invalid={errorMessage ? true : textareaProps["aria-invalid"]}
+        className={className}
       />
-      {errorMessage ? <p className="text-xs text-destructive">{errorMessage}</p> : null}
-    </label>
+      {errorMessage ? (
+        <p id={errorId} className="text-xs text-destructive">
+          {errorMessage}
+        </p>
+      ) : null}
+    </div>
   );
 }
